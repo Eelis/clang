@@ -1005,13 +1005,15 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
 /// errors in the condition.
 bool Parser::ParseParenExprOrCondition(ExprResult &ExprResult,
                                        Decl *&DeclResult,
+                                       Decl *&DerefResult,
+                                       Scope *DerefScope,
                                        SourceLocation Loc,
                                        bool ConvertToBoolean) {
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
 
   if (getLangOpts().CPlusPlus)
-    ParseCXXCondition(ExprResult, DeclResult, Loc, ConvertToBoolean);
+    ParseCXXCondition(ExprResult, DeclResult, DerefResult, DerefScope, Loc, ConvertToBoolean);
   else {
     ExprResult = ParseExpression();
     DeclResult = nullptr;
@@ -1085,10 +1087,18 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   // Parse the condition.
   ExprResult CondExp;
   Decl *CondVar = nullptr;
-  if (ParseParenExprOrCondition(CondExp, CondVar, IfLoc, true))
+  Decl *DerefVar = nullptr;
+
+  // We create the "then" scope before entering it, so that
+  // ParseParenExprOrCondition can insert a deref declaration into it.
+  Scope ThenScope(getCurScope(), Scope::DeclScope, Diags);
+    // FIXME: this doesn't take advantage of the scope cache
+
+  if (ParseParenExprOrCondition(CondExp, CondVar, DerefVar, &ThenScope, IfLoc, true))
     return StmtError();
 
   FullExprArg FullCondExp(Actions.MakeFullExpr(CondExp.get(), IfLoc));
+  
 
   // C99 6.8.4p3 - In C99, the body of the if statement is a scope, even if
   // there is no compound stmt.  C90 does not have this clause.  We only do this
@@ -1108,7 +1118,8 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   //    would have to notify ParseStatement not to create a new scope. It's
   //    simpler to let it create a new scope.
   //
-  ParseScope InnerScope(this, Scope::DeclScope, C99orCXX, Tok.is(tok::l_brace));
+
+  Actions.CurScope = &ThenScope;
 
   // Read the 'then' stmt.
   SourceLocation ThenStmtLoc = Tok.getLocation();
@@ -1116,8 +1127,9 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   SourceLocation InnerStatementTrailingElseLoc;
   StmtResult ThenStmt(ParseStatement(&InnerStatementTrailingElseLoc));
 
-  // Pop the 'if' scope if needed.
-  InnerScope.Exit();
+  // Pop the 'then' scope.
+  Actions.ActOnPopScope(Tok.getLocation(), &ThenScope); // FIXME: different tok?
+  Actions.CurScope = ThenScope.getParent();
 
   // If it has an else, parse it.
   SourceLocation ElseLoc;
@@ -1172,8 +1184,8 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   if (ElseStmt.isInvalid())
     ElseStmt = Actions.ActOnNullStmt(ElseStmtLoc);
 
-  return Actions.ActOnIfStmt(IfLoc, FullCondExp, CondVar, ThenStmt.get(),
-                             ElseLoc, ElseStmt.get());
+  return Actions.ActOnIfStmt(IfLoc, FullCondExp, CondVar, DerefVar,
+                             ThenStmt.get(), ElseLoc, ElseStmt.get());
 }
 
 /// ParseSwitchStatement
@@ -1212,8 +1224,10 @@ StmtResult Parser::ParseSwitchStatement(SourceLocation *TrailingElseLoc) {
   // Parse the condition.
   ExprResult Cond;
   Decl *CondVar = nullptr;
-  if (ParseParenExprOrCondition(Cond, CondVar, SwitchLoc, false))
+  Decl *DerefVar = nullptr;
+  if (ParseParenExprOrCondition(Cond, CondVar, DerefVar, nullptr, SwitchLoc, false))
     return StmtError();
+      // FIXME: complain about indirect-conditions
 
   StmtResult Switch
     = Actions.ActOnStartOfSwitchStmt(SwitchLoc, Cond.get(), CondVar);
@@ -1300,8 +1314,10 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc) {
   // Parse the condition.
   ExprResult Cond;
   Decl *CondVar = nullptr;
-  if (ParseParenExprOrCondition(Cond, CondVar, WhileLoc, true))
+  Decl *DerefVar = nullptr;
+  if (ParseParenExprOrCondition(Cond, CondVar, DerefVar, nullptr, WhileLoc, true))
     return StmtError();
+      // FIXME: handle indirect-conditions
 
   FullExprArg FullCond(Actions.MakeFullExpr(Cond.get(), WhileLoc));
 
@@ -1616,7 +1632,11 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc) {
     } else {
       ExprResult Second;
       if (getLangOpts().CPlusPlus)
-        ParseCXXCondition(Second, SecondVar, ForLoc, true);
+      {
+        Decl *DerefDecl;
+        ParseCXXCondition(Second, SecondVar, DerefDecl, nullptr, ForLoc, true);
+        // FIXME: handle indirect-conditions
+      }
       else {
         Second = ParseExpression();
         if (!Second.isInvalid())

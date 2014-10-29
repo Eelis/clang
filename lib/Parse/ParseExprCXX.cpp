@@ -1589,12 +1589,13 @@ Parser::ParseCXXTypeConstructExpression(const DeclSpec &DS) {
 /// [C++11] type-specifier-seq declarator braced-init-list
 /// [GNU]   type-specifier-seq declarator simple-asm-expr[opt] attributes[opt]
 ///             '=' assignment-expression
+/// [C++1z] type-specifier-seq declarator : expression
 ///
-/// \param ExprOut if the condition was parsed as an expression, the parsed
-/// expression.
+/// \param ExprOut if the condition was parsed as an expression or
+/// indirect-condition, the parsed expression.
 ///
-/// \param DeclOut if the condition was parsed as a declaration, the parsed
-/// declaration.
+/// \param DeclOut if the condition was parsed as a declaration that
+/// is not an indirect-condition, the parsed declaration.
 ///
 /// \param Loc The location of the start of the statement that requires this
 /// condition, e.g., the "for" in a for loop.
@@ -1605,6 +1606,8 @@ Parser::ParseCXXTypeConstructExpression(const DeclSpec &DS) {
 /// \returns true if there was a parsing, false otherwise.
 bool Parser::ParseCXXCondition(ExprResult &ExprOut,
                                Decl *&DeclOut,
+                               Decl *&DerefOut,
+                               Scope *DerefScope,
                                SourceLocation Loc,
                                bool ConvertToBoolean) {
   if (Tok.is(tok::code_completion)) {
@@ -1656,8 +1659,18 @@ bool Parser::ParseCXXCondition(ExprResult &ExprOut,
   // If attributes are present, parse them.
   MaybeParseGNUAttributes(DeclaratorInfo);
 
+  if (DerefScope && getLangOpts().CPlusPlus1z && Tok.is(tok::colon)) {
+    // C++1z indirect-condition
+    ConsumeToken();
+    ExprOut = ParseExpression();
+    DerefOut = Actions.ActOnDeclarator(DerefScope, DeclaratorInfo);
+    Actions.FinalizeDeclaration(DerefOut);
+    // FIXME: storage class/declaration kind checks and such
+    return false;
+  }
+
   // Type-check the declaration itself.
-  DeclResult Dcl = Actions.ActOnCXXConditionDeclaration(getCurScope(), 
+  DeclResult Dcl = Actions.ActOnCXXConditionDeclaration(getCurScope(),
                                                         DeclaratorInfo);
   DeclOut = Dcl.get();
   ExprOut = ExprError();

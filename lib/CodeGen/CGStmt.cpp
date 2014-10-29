@@ -557,6 +557,10 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
   Cnt.beginRegion(Builder);
   {
     RunCleanupsScope ThenScope(*this);
+
+    if (const Stmt *Deref = S.getDeref())
+      EmitStmt(Deref);
+
     EmitStmt(S.getThen());
   }
   EmitBranch(ContBlock);

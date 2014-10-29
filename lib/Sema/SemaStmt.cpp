@@ -455,9 +455,17 @@ StmtResult Sema::ActOnAttributedStmt(SourceLocation AttrLoc,
   return LS;
 }
 
+namespace {
+  VarDecl *BuildForRangeVarDecl(Sema &SemaRef, SourceLocation Loc,
+                                QualType Type, const char *Name);
+}
+
+static bool FinishForRangeVarDecl(Sema &SemaRef, VarDecl *Decl, Expr *Init,
+                                  SourceLocation Loc, int DiagID);
+
 StmtResult
 Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
-                  Stmt *thenStmt, SourceLocation ElseLoc,
+                  Decl *Deref, Stmt *thenStmt, SourceLocation ElseLoc,
                   Stmt *elseStmt) {
   // If the condition was invalid, discard the if statement.  We could recover
   // better by replacing it with a valid expr, but don't do that yet.
@@ -469,6 +477,52 @@ Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
   ExprResult CondResult(CondVal.release());
 
   VarDecl *ConditionVar = nullptr;
+
+  Stmt * DerefStmt = nullptr;
+
+  if (Deref)
+  {
+    // We have if(Deref:CondVal), and build auto&&__p=CondVal;
+
+    SourceLocation CondValLoc = CondVal->getLocStart();
+
+    ConditionVar = BuildForRangeVarDecl(*this, CondValLoc,
+                                        Context.getAutoRRefDeductType(),
+                                        "__p");
+
+    if (FinishForRangeVarDecl(*this, ConditionVar, CondVal.get(), CondValLoc,
+                              diag::err_for_range_deduction_failure))
+                                  // FIXME: different error
+      return StmtError();
+
+    // Build, check, and attach *__p expression to deref decl.
+
+    QualType T = ConditionVar->getType();
+    const QualType Tnonref = T.getNonReferenceType();
+
+    ExprResult ConditionVarRef = BuildDeclRefExpr(ConditionVar, Tnonref,
+                                                  VK_LValue, CondValLoc);
+    if (ConditionVarRef.isInvalid())
+      return StmtError();
+
+    ExprResult DerefExpr = ActOnUnaryOp(getCurScope(), CondValLoc,
+                                        tok::star, ConditionVarRef.get());
+    if (DerefExpr.isInvalid()) {
+      // FIXME: diagnostic?
+      return StmtError();
+    }
+
+    if (!Deref->isInvalidDecl())
+      AddInitializerToDecl(Deref, DerefExpr.get(), /*DirectInit=*/false,
+                           /*TypeMayContainAuto=*/true);
+
+    SourceRange DerefRange = Deref->getSourceRange();
+    DerefStmt = new (Context) DeclStmt(DeclGroupRef(Deref),
+                                       DerefRange.getBegin(), DerefRange.getEnd());
+
+    CondVar = ConditionVar;
+  }
+
   if (CondVar) {
     ConditionVar = cast<VarDecl>(CondVar);
     CondResult = CheckConditionVariable(ConditionVar, IfLoc, true);
@@ -489,7 +543,7 @@ Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
   DiagnoseUnusedExprResult(elseStmt);
 
   return new (Context) IfStmt(Context, IfLoc, ConditionVar, ConditionExpr,
-                              thenStmt, ElseLoc, elseStmt);
+                              thenStmt, ElseLoc, elseStmt, DerefStmt);
 }
 
 namespace {

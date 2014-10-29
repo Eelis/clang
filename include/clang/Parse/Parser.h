@@ -1500,6 +1500,7 @@ private:
   //===--------------------------------------------------------------------===//
   // C++ if/switch/while condition expression.
   bool ParseCXXCondition(ExprResult &ExprResult, Decl *&DeclResult,
+                         Decl *&DerefResult, Scope *DerefScope,
                          SourceLocation Loc, bool ConvertToBoolean);
 
   //===--------------------------------------------------------------------===//
@@ -1582,6 +1583,8 @@ private:
   StmtResult ParseCompoundStatementBody(bool isStmtExpr = false);
   bool ParseParenExprOrCondition(ExprResult &ExprResult,
                                  Decl *&DeclResult,
+                                 Decl *&DerefResult,
+                                 Scope *DerefScope,
                                  SourceLocation Loc,
                                  bool ConvertToBoolean);
   StmtResult ParseIfStatement(SourceLocation *TrailingElseLoc);

@@ -874,13 +874,14 @@ const VarDecl *CXXForRangeStmt::getLoopVariable() const {
 }
 
 IfStmt::IfStmt(const ASTContext &C, SourceLocation IL, VarDecl *var, Expr *cond,
-               Stmt *then, SourceLocation EL, Stmt *elsev)
+               Stmt *then, SourceLocation EL, Stmt *elsev, Stmt *deref)
   : Stmt(IfStmtClass), IfLoc(IL), ElseLoc(EL)
 {
   setConditionVariable(C, var);
   SubExprs[COND] = cond;
   SubExprs[THEN] = then;
   SubExprs[ELSE] = elsev;
+  SubExprs[DEREF] = deref;
 }
 
 VarDecl *IfStmt::getConditionVariable() const {

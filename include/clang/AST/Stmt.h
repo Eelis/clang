@@ -870,7 +870,7 @@ public:
 /// IfStmt - This represents an if/then/else.
 ///
 class IfStmt : public Stmt {
-  enum { VAR, COND, THEN, ELSE, END_EXPR };
+  enum { VAR, COND, THEN, ELSE, DEREF, END_EXPR };
   Stmt* SubExprs[END_EXPR];
 
   SourceLocation IfLoc;
@@ -879,7 +879,7 @@ class IfStmt : public Stmt {
 public:
   IfStmt(const ASTContext &C, SourceLocation IL, VarDecl *var, Expr *cond,
          Stmt *then, SourceLocation EL = SourceLocation(),
-         Stmt *elsev = nullptr);
+         Stmt *elsev = nullptr, Stmt *Deref = nullptr);
 
   /// \brief Build an empty if/then/else statement
   explicit IfStmt(EmptyShell Empty) : Stmt(IfStmtClass, Empty) { }
@@ -889,6 +889,14 @@ public:
   /// In the following example, "x" is the condition variable.
   /// \code
   /// if (int x = foo()) {
+  ///   printf("x is %d", x);
+  /// }
+  /// \endcode
+  ///
+  /// And in the following example, the condition variable is the
+  /// automatically generated "auto && __p = e;".
+  /// \code
+  /// if (int x : e) {
   ///   printf("x is %d", x);
   /// }
   /// \endcode
@@ -907,6 +915,10 @@ public:
   void setThen(Stmt *S) { SubExprs[THEN] = S; }
   const Stmt *getElse() const { return SubExprs[ELSE]; }
   void setElse(Stmt *S) { SubExprs[ELSE] = S; }
+
+  /// For an indirect-condition "if (T x : e)", the deref statement is the
+  /// automatically generated "T x = *__p;", to be emitted in the then part.
+  const Stmt *getDeref() const { return SubExprs[DEREF]; }
 
   Expr *getCond() { return reinterpret_cast<Expr*>(SubExprs[COND]); }
   Stmt *getThen() { return SubExprs[THEN]; }
